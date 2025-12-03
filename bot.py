@@ -60,7 +60,7 @@ def format_duration(seconds):
     try:
         if not seconds or seconds == 0:
             return "🔴 Live"
-        seconds = int(float(seconds))  # Convert to int safely
+        seconds = int(float(seconds))
         mins = seconds // 60
         secs = seconds % 60
         return f"{mins}:{secs:02d}"
@@ -90,17 +90,35 @@ def format_size(bytes):
     except:
         return "Unknown"
 
-# Get video info
-def get_video_info(url):
-    logger.info(f"📹 Getting info: {url[:50]}...")
-    ydl_opts = {
+# YT-DLP options with bot bypass
+def get_ydl_opts(format_str='best'):
+    return {
+        'format': format_str,
         'quiet': True,
         'no_warnings': True,
         'extract_flat': False,
         'socket_timeout': 30,
+        'extractor_args': {
+            'youtube': {
+                'skip': ['hls', 'dash', 'translated_subs'],
+                'player_skip': ['js', 'configs', 'webpage'],
+                'player_client': ['android', 'web'],
+            }
+        },
+        'http_headers': {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept-Language': 'en-us,en;q=0.5',
+            'Sec-Fetch-Mode': 'navigate',
+        }
     }
+
+# Get video info
+def get_video_info(url):
+    logger.info(f"📹 Getting info: {url[:50]}...")
+    
     try:
-        with YoutubeDL(ydl_opts) as ydl:
+        with YoutubeDL(get_ydl_opts()) as ydl:
             info = ydl.extract_info(url, download=False)
             result = {
                 'title': info.get('title', 'Unknown')[:100],
@@ -127,15 +145,8 @@ def get_download_info(url, format_type='video', quality='best'):
     else:
         fmt = f'best[height<={quality}][ext=mp4]/best[height<={quality}]'
     
-    ydl_opts = {
-        'format': fmt,
-        'quiet': True,
-        'no_warnings': True,
-        'socket_timeout': 30,
-    }
-    
     try:
-        with YoutubeDL(ydl_opts) as ydl:
+        with YoutubeDL(get_ydl_opts(fmt)) as ydl:
             info = ydl.extract_info(url, download=False)
             
             if 'url' in info:
@@ -160,13 +171,12 @@ def get_download_info(url, format_type='video', quality='best'):
 # Get playlist
 def get_playlist_info(url):
     logger.info(f"📑 Getting playlist...")
-    ydl_opts = {
-        'quiet': True,
-        'extract_flat': True,
-        'socket_timeout': 30,
-    }
+    
+    opts = get_ydl_opts()
+    opts['extract_flat'] = True
+    
     try:
-        with YoutubeDL(ydl_opts) as ydl:
+        with YoutubeDL(opts) as ydl:
             info = ydl.extract_info(url, download=False)
             if 'entries' in info:
                 videos = []
@@ -188,14 +198,13 @@ def get_playlist_info(url):
 # Search YouTube
 def search_youtube(query, max_results=5):
     logger.info(f"🔍 Searching: {query}")
-    ydl_opts = {
-        'quiet': True,
-        'extract_flat': True,
-        'default_search': 'ytsearch',
-        'socket_timeout': 30,
-    }
+    
+    opts = get_ydl_opts()
+    opts['extract_flat'] = True
+    opts['default_search'] = 'ytsearch'
+    
     try:
-        with YoutubeDL(ydl_opts) as ydl:
+        with YoutubeDL(opts) as ydl:
             results = ydl.extract_info(f"ytsearch{max_results}:{query}", download=False)
             entries = results.get('entries', [])
             logger.info(f"✅ Found {len(entries)} results")
@@ -294,8 +303,8 @@ async def about_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 🔒 Privacy focused
 💾 No data stored
 
-**Version:** 4.0 Final
-**Engine:** yt-dlp
+**Version:** 4.1 Final
+**Engine:** yt-dlp (bypass enabled)
 **Status:** 24/7 Online
 
 Made with ❤️
@@ -330,7 +339,6 @@ async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             video_id = video.get('id', '')
             duration = video.get('duration', 0)
             
-            # Safe duration format
             dur_str = format_duration(duration)
             
             text += f"{i}. **{title}**\n   ⏱ {dur_str}\n\n"
@@ -345,7 +353,7 @@ async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
     except Exception as e:
         logger.error(f"❌ Search failed: {e}")
-        await msg.edit_text(f"❌ Error: {str(e)}")
+        await msg.edit_text(f"❌ Error: {str(e)[:100]}")
 
 # Handle YouTube links
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -355,8 +363,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
     logger.info(f"💬 Message: {text[:50]}...")
     
-    # Extract URL from forwarded messages
-    if update.message.forward_from or update.message.forward_from_chat:
+    # Check for forwarded message using is_automatic_forward or forward_date
+    if hasattr(update.message, 'forward_date') and update.message.forward_date:
+        logger.info("📨 Forwarded message detected")
+        # Extract URLs from forwarded message
         urls = re.findall(r'https?://[^\s]+', text)
         if urls:
             text = urls[0]
@@ -380,7 +390,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         info = get_video_info(url)
         if not info:
-            await msg.edit_text("❌ Failed to get video info. Try again!")
+            await msg.edit_text("❌ Failed to get video info. Try again!\n\n💡 Tip: Try copying the link again.")
             return
         
         # Store in context
@@ -494,7 +504,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
             info = get_video_info(url)
             if not info:
-                await query.edit_message_text("❌ Failed!")
+                await query.edit_message_text("❌ Failed to load video!\n\n💡 Try: Copy link again and send directly")
                 return
             
             context.user_data['video_info'] = info
@@ -524,7 +534,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await query.edit_message_text("❌ Session expired!")
                 return
             
-            await query.edit_message_text("⏳ **Preparing...**\n\n_Please wait 5-15s_", parse_mode='Markdown')
+            await query.edit_message_text("⏳ **Preparing...**\n\n_Please wait 10-20s_", parse_mode='Markdown')
             
             format_type = 'audio' if 'audio' in data else 'video'
             quality = 'best'
@@ -541,7 +551,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             dl_info = get_download_info(url, format_type, quality)
             
             if not dl_info:
-                await query.edit_message_text("❌ Failed! Try another quality.")
+                await query.edit_message_text("❌ Failed to get download link!\n\n💡 Try: Another quality or send link again")
                 return
             
             dl_url = dl_info['url']
@@ -590,12 +600,12 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 
                 await query.message.reply_text(
                     f"""
-✅ **File sent!**
+✅ **File sent successfully!**
 
 📥 Check above for {emoji} **{qual_text}** file
 
-**Alternative:** Browser link below
-⚠️ Expires in 6 hours
+**Alternative:** Browser download link
+⚠️ Link expires in 6 hours
 """,
                     reply_markup=InlineKeyboardMarkup(keyboard),
                     parse_mode='Markdown'
@@ -606,18 +616,18 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 
                 # Too large
                 keyboard = [
-                    [InlineKeyboardButton("🌐 Download Link", url=dl_url)],
+                    [InlineKeyboardButton("🌐 Download in Browser", url=dl_url)],
                     [InlineKeyboardButton("🔄 Try Lower Quality", callback_data=f"dl_{url}")],
                 ]
                 
                 await query.message.reply_text(
                     f"""
-⚠️ **File too large!**
+⚠️ **File too large for Telegram!**
 
 {emoji} {title}
 💾 Size: {size_text}
 
-Use browser link:
+**Use browser download link:**
 ⏰ Expires in 6 hours
 """,
                     reply_markup=InlineKeyboardMarkup(keyboard),
@@ -627,7 +637,7 @@ Use browser link:
     except Exception as e:
         logger.error(f"❌ Callback error: {e}")
         logger.error(traceback.format_exc())
-        await query.message.reply_text(f"❌ Error: {str(e)[:100]}")
+        await query.message.reply_text(f"❌ Error occurred: {str(e)[:100]}")
 
 # Error handler
 async def error_handler(update, context):
@@ -663,7 +673,7 @@ def main():
     app.add_error_handler(error_handler)
     
     logger.info("=" * 50)
-    logger.info("🚀 BOT STARTED - 100% WORKING!")
+    logger.info("🚀 BOT STARTED - ALL FIXED!")
     logger.info("=" * 50)
     
     app.run_polling(
