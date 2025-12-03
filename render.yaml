@@ -2,10 +2,14 @@ services:
   - type: web
     name: youtube-telegram-bot
     env: python
-    buildCommand: pip install -r requirements.txt
+    region: oregon
+    plan: free
+    buildCommand: pip install --upgrade pip && pip install -r requirements.txt
     startCommand: python bot.py
     envVars:
       - key: BOT_TOKEN
         sync: false
       - key: PORT
-        value: 8080
+        value: 10000
+      - key: PYTHON_VERSION
+        value: 3.12.0
